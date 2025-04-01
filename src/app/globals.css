@@ -1,0 +1,11 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: var(--font-inter, 'Inter', sans-serif);
+}
+
+body {
+  background-color: #ffffff;
+}
