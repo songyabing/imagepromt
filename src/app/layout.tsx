@@ -25,7 +25,7 @@ export const metadata: Metadata = {
     "professional prompt generator", "accurate image description"
   ],
   icons: {
-    icon: '/favicon.svg'
+    icon: '/favicon.ico'
   },
   verification: {
     google: 'QHUIuwZ89g_3hJY5x3nZbwqETrgWLrOTLRFhe0bPjSo'
