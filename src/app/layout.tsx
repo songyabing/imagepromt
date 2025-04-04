@@ -10,8 +10,20 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: "ImagePrompt - AI-Powered Visual Prompt Generator",
-  description: "Smart image analysis generates professional AI art prompts effortlessly",
-  keywords: ["image to prompt", "AI", "prompt generation", "image analysis"],
+  description: "Transform any image into perfect AI prompts. Our advanced AI technology helps you describe images and generate accurate prompts for Midjourney, Stable Diffusion, and other AI art models.",
+  keywords: [
+    // 单个关键词
+    "image", "prompt", "ai", "generator", "images", "describe", "generate", "generated", "models",
+    // 组合关键词
+    "image to prompt", "prompt generator", "ai image", "describe image",
+    "image prompt generator", "ai prompt generator", "image description tool",
+    // 功能相关
+    "image analysis", "visual prompt", "ai art prompts", "midjourney prompts",
+    "stable diffusion prompts", "dall-e prompts", "ai image generation",
+    // 长尾关键词
+    "convert image to prompt", "image prompt optimization", "ai art description",
+    "professional prompt generator", "accurate image description"
+  ],
   icons: {
     icon: '/favicon.svg'
   },
