@@ -25,7 +25,12 @@ app = FastAPI()
 # 添加 CORS 中间件
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://www.imageprompt.vip",
+        "https://imageprompt.vip",
+        "http://localhost:3000",
+        "https://imagepromt.vercel.app"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
