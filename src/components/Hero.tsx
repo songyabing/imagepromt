@@ -46,8 +46,8 @@ export default function Hero() {
       setError('');
       const formData = new FormData();
       formData.append('files', imageFile);
+      formData.append('language', 'en');  // 添加英文语言参数
       
-      console.log('Sending request to JoyCaption API...');
       const response = await axios.post(
         'http://localhost:8088/api/joycaption/upload',
         formData,

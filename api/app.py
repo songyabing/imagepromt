@@ -151,7 +151,7 @@ async def get_proxied_image(url: str = Query(..., description="图片 URL")):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/joycaption/upload")
-async def generate_joycaption(files: UploadFile = File(...), language: str = 'zh'):
+async def generate_joycaption(files: UploadFile = File(...), language: str = 'en'):  
     try:
         print(f"接收到图片描述请求，语言：{language}")
         
@@ -162,9 +162,6 @@ async def generate_joycaption(files: UploadFile = File(...), language: str = 'zh
         
         contents = await files.read()
         print(f"图片大小: {len(contents)} bytes")
-        
-        if len(contents) > 10 * 1024 * 1024:  # 10MB
-            raise HTTPException(status_code=400, detail="图片大小不能超过10MB")
         
         try:
             # 处理图片
@@ -188,16 +185,18 @@ async def generate_joycaption(files: UploadFile = File(...), language: str = 'zh
                     detail="无法从API响应中获取图片描述"
                 )
             
-            # 如果需要中文输出，使用翻译API
-            if language == 'zh':
+            print("原始API返回:", caption)  
+            
+            # 只有当明确要求中文时才翻译
+            if language.lower() == 'zh':
                 try:
                     caption = translate_to_chinese(caption)
+                    print("翻译后结果:", caption)
                 except Exception as e:
                     print(f"翻译失败: {str(e)}")
-                    # 如果翻译失败，返回原始英文
-                    pass
+                    # 翻译失败时保持英文
             
-            print(f"生成的描述: {caption}")
+            print(f"最终描述: {caption}")
             return {"caption": caption}
             
         except HTTPException:
@@ -213,7 +212,7 @@ async def generate_joycaption(files: UploadFile = File(...), language: str = 'zh
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/interrogator/upload")
-async def generate_interrogator(files: UploadFile = File(...), language: str = 'zh'):
+async def generate_interrogator(files: UploadFile = File(...), language: str = 'en'):  
     try:
         print(f"接收到 CLIP-Interrogator 请求，语言：{language}")
         
@@ -224,9 +223,6 @@ async def generate_interrogator(files: UploadFile = File(...), language: str = '
         
         contents = await files.read()
         print(f"图片大小: {len(contents)} bytes")
-        
-        if len(contents) > 10 * 1024 * 1024:  # 10MB
-            raise HTTPException(status_code=400, detail="图片大小不能超过10MB")
         
         try:
             # 处理图片
@@ -250,16 +246,18 @@ async def generate_interrogator(files: UploadFile = File(...), language: str = '
                     detail="无法从API响应中获取图片描述"
                 )
             
-            # 如果需要中文输出，使用翻译API
-            if language == 'zh':
+            print("原始API返回:", caption)  
+            
+            # 只有当明确要求中文时才翻译
+            if language.lower() == 'zh':
                 try:
                     caption = translate_to_chinese(caption)
+                    print("翻译后结果:", caption)
                 except Exception as e:
                     print(f"翻译失败: {str(e)}")
-                    # 如果翻译失败，返回原始英文
-                    pass
+                    # 翻译失败时保持英文
             
-            print(f"生成的描述: {caption}")
+            print(f"最终描述: {caption}")
             return {"caption": caption}
             
         except HTTPException:
