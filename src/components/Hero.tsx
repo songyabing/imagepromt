@@ -49,7 +49,7 @@ export default function Hero() {
       formData.append('language', 'en');  // 添加英文语言参数
       
       const response = await axios.post(
-        'http://localhost:8088/api/joycaption/upload',
+        'http://localhost:8000/api/joycaption/upload',
         formData,
         {
           headers: {
