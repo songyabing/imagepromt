@@ -131,24 +131,52 @@ def translate_to_english(text: str) -> str:
         print(f"翻译失败: {str(e)}")
         return text
 
+# 添加图片代理路由
 @app.get("/api/proxy/image")
-async def get_proxied_image(url: str = Query(..., description="图片 URL")):
-    """
-    代理获取图片内容
-    """
+async def proxy_image(url: str = Query(...)):
     try:
-        # 代理路由实现
-        async def proxy_image(url: str):
-            response = requests.get(url)
+        # 验证URL
+        if not url.startswith(('http://', 'https://')):
+            raise HTTPException(status_code=400, detail="Invalid URL scheme")
+
+        # 设置请求头
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+
+        try:
+            response = requests.get(url, headers=headers, timeout=10, stream=True)
             response.raise_for_status()
-            return response.content, response.headers.get('Content-Type')
-        
-        content, content_type = await proxy_image(url)
-        return Response(content=content, media_type=content_type)
-    except HTTPException as e:
-        raise e
+        except requests.Timeout:
+            raise HTTPException(status_code=504, detail="Image fetch timeout")
+        except requests.HTTPError as e:
+            raise HTTPException(status_code=e.response.status_code, detail=f"Failed to fetch image: {str(e)}")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to fetch image: {str(e)}")
+
+        # 验证内容类型
+        content_type = response.headers.get('content-type', '')
+        if not content_type.startswith('image/'):
+            raise HTTPException(status_code=400, detail="URL does not point to a valid image")
+
+        # 验证文件大小
+        content_length = response.headers.get('content-length')
+        if content_length and int(content_length) > 10 * 1024 * 1024:  # 10MB
+            raise HTTPException(status_code=400, detail="Image size exceeds 10MB limit")
+
+        # 返回图片内容
+        return Response(
+            content=response.content,
+            media_type=content_type,
+            headers={
+                'Cache-Control': 'public, max-age=31536000',
+                'Access-Control-Allow-Origin': '*'
+            }
+        )
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @app.post("/api/joycaption/upload")
 async def generate_joycaption(files: UploadFile = File(...), language: str = 'en'):  
@@ -165,24 +193,43 @@ async def generate_joycaption(files: UploadFile = File(...), language: str = 'en
         
         try:
             # 处理图片
-            image = Image.open(io.BytesIO(contents))
+            try:
+                image = Image.open(io.BytesIO(contents))
+            except Exception as e:
+                print(f"无法打开图片: {str(e)}")
+                raise HTTPException(status_code=400, detail="Invalid image format")
+
             if image.mode != 'RGB':
-                image = image.convert('RGB')
+                try:
+                    image = image.convert('RGB')
+                except Exception as e:
+                    print(f"图片转换失败: {str(e)}")
+                    raise HTTPException(status_code=400, detail="Failed to process image")
             
             # 将图片转换为字节流
-            img_byte_arr = io.BytesIO()
-            image.save(img_byte_arr, format='JPEG')
-            img_byte_arr = img_byte_arr.getvalue()
+            try:
+                img_byte_arr = io.BytesIO()
+                image.save(img_byte_arr, format='JPEG')
+                img_byte_arr = img_byte_arr.getvalue()
+            except Exception as e:
+                print(f"图片编码失败: {str(e)}")
+                raise HTTPException(status_code=500, detail="Failed to encode image")
             
             # 发送请求到 Hugging Face API
             API_URL = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-large"
-            result = call_huggingface_api(API_URL, img_byte_arr)
+            try:
+                result = call_huggingface_api(API_URL, img_byte_arr)
+            except HTTPException:
+                raise
+            except Exception as e:
+                print(f"API调用失败: {str(e)}")
+                raise HTTPException(status_code=502, detail="Failed to call external API")
             
             caption = result.get('generated_text', '')
             if not caption:
                 raise HTTPException(
-                    status_code=500,
-                    detail="无法从API响应中获取图片描述"
+                    status_code=502,
+                    detail="No caption generated from API"
                 )
             
             print("原始API返回:", caption)  
@@ -203,7 +250,7 @@ async def generate_joycaption(files: UploadFile = File(...), language: str = 'en
             raise
         except Exception as e:
             print(f"处理图片时出错: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"处理图片时出错: {str(e)}")
+            raise HTTPException(status_code=500, detail="Internal server error")
             
     except HTTPException:
         raise
@@ -226,24 +273,43 @@ async def generate_interrogator(files: UploadFile = File(...), language: str = '
         
         try:
             # 处理图片
-            image = Image.open(io.BytesIO(contents))
+            try:
+                image = Image.open(io.BytesIO(contents))
+            except Exception as e:
+                print(f"无法打开图片: {str(e)}")
+                raise HTTPException(status_code=400, detail="Invalid image format")
+
             if image.mode != 'RGB':
-                image = image.convert('RGB')
+                try:
+                    image = image.convert('RGB')
+                except Exception as e:
+                    print(f"图片转换失败: {str(e)}")
+                    raise HTTPException(status_code=400, detail="Failed to process image")
             
             # 将图片转换为字节流
-            img_byte_arr = io.BytesIO()
-            image.save(img_byte_arr, format='JPEG')
-            img_byte_arr = img_byte_arr.getvalue()
+            try:
+                img_byte_arr = io.BytesIO()
+                image.save(img_byte_arr, format='JPEG')
+                img_byte_arr = img_byte_arr.getvalue()
+            except Exception as e:
+                print(f"图片编码失败: {str(e)}")
+                raise HTTPException(status_code=500, detail="Failed to encode image")
             
             # 发送请求到 Image Captioning API
             API_URL = "https://api-inference.huggingface.co/models/nlpconnect/vit-gpt2-image-captioning"
-            result = call_huggingface_api(API_URL, img_byte_arr)
+            try:
+                result = call_huggingface_api(API_URL, img_byte_arr)
+            except HTTPException:
+                raise
+            except Exception as e:
+                print(f"API调用失败: {str(e)}")
+                raise HTTPException(status_code=502, detail="Failed to call external API")
             
             caption = result.get('generated_text', '')
             if not caption:
                 raise HTTPException(
-                    status_code=500,
-                    detail="无法从API响应中获取图片描述"
+                    status_code=502,
+                    detail="No caption generated from API"
                 )
             
             print("原始API返回:", caption)  
@@ -264,7 +330,7 @@ async def generate_interrogator(files: UploadFile = File(...), language: str = '
             raise
         except Exception as e:
             print(f"处理图片时出错: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"处理图片时出错: {str(e)}")
+            raise HTTPException(status_code=500, detail="Internal server error")
             
     except HTTPException:
         raise

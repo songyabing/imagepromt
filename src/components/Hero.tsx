@@ -44,10 +44,23 @@ export default function Hero() {
     try {
       setIsGenerating(true);
       setError('');
+
+      // 验证文件大小
+      const maxSize = 10 * 1024 * 1024; // 10MB
+      if (imageFile.size > maxSize) {
+        throw new Error('Image size exceeds 10MB limit');
+      }
+
+      // 验证文件类型
+      if (!imageFile.type.startsWith('image/')) {
+        throw new Error('Only image files are supported');
+      }
+
       const formData = new FormData();
       formData.append('files', imageFile);
-      formData.append('language', 'en');  // 添加英文语言参数
+      formData.append('language', 'en');
       
+      console.log('Sending request to JoyCaption API...');
       const response = await axios.post(
         'http://localhost:8000/api/joycaption/upload',
         formData,
@@ -57,8 +70,8 @@ export default function Hero() {
           },
           timeout: 120000,
           timeoutErrorMessage: 'Request timed out, please try again',
-          maxContentLength: Infinity,
-          maxBodyLength: Infinity,
+          maxContentLength: maxSize,
+          maxBodyLength: maxSize,
           validateStatus: function (status) {
             return status >= 200 && status < 500;
           }
@@ -67,31 +80,40 @@ export default function Hero() {
       console.log('JoyCaption API response:', response.data);
 
       if (response.status >= 400) {
-        throw new Error('Please re-upload the photo to generate prompts');
+        console.error('API error:', response.data);
+        throw new Error(response.data?.detail || 'Failed to generate prompt');
       }
 
       if (response.data?.caption) {
         return response.data.caption;
       } else {
-        setError('Please re-upload the photo to generate prompts');
+        console.error('No caption in response:', response.data);
+        setError('No caption generated. Please try again with a different image.');
         return '';
       }
     } catch (error: any) {
+      console.error('Full error object:', error);
       if (axios.isAxiosError(error)) {
         if (error.code === 'ECONNABORTED') {
-          setError('Please re-upload the photo to generate prompts');
+          setError('Request timed out. Please try again.');
         } else if (error.response) {
-          setError('Please re-upload the photo to generate prompts');
+          const errorMessage = error.response.data?.detail || 'Server error. Please try again.';
+          console.error('Server error response:', error.response.data);
+          setError(errorMessage);
         } else if (error.request) {
-          setError('Please re-upload the photo to generate prompts');
+          console.error('No response received:', error.request);
+          setError('No response from server. Please check your connection.');
         } else {
-          setError('Please re-upload the photo to generate prompts');
+          console.error('Axios error:', error.message);
+          setError('An error occurred. Please try again.');
         }
       } else {
-        setError('Please re-upload the photo to generate prompts');
+        console.error('Non-Axios error:', error);
+        setError(error.message || 'An unexpected error occurred.');
       }
-      console.error('JoyCaption prompt generation error:', error);
       return '';
+    } finally {
+      setIsGenerating(false);
     }
   };
 
@@ -203,23 +225,36 @@ export default function Hero() {
 
   const loadImageFromUrl = async () => {
     if (!imageUrl) {
-      setError('Please re-upload the photo to generate prompts');
+      setError('Please enter an image URL');
       return;
     }
 
     try {
       setError('');
-      const proxyUrl = `http://localhost:8088/api/proxy/image?url=${encodeURIComponent(imageUrl)}`;
+      console.log('Loading image from URL:', imageUrl);
+      
+      const proxyUrl = `http://localhost:8000/api/proxy/image?url=${encodeURIComponent(imageUrl)}`;
+      console.log('Proxy URL:', proxyUrl);
+      
       const response = await fetch(proxyUrl);
       if (!response.ok) {
-        throw new Error('Failed to load image');
+        const errorData = await response.json().catch(() => ({}));
+        console.error('Proxy error:', errorData);
+        throw new Error(errorData.detail || 'Failed to load image');
       }
+
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.startsWith('image/')) {
+        throw new Error('Invalid image type');
+      }
+
       const blob = await response.blob();
-      const file = new File([blob], 'image.jpg', { type: 'image/jpeg' });
+      const file = new File([blob], 'image.jpg', { type: contentType });
+      console.log('Image loaded successfully');
       handleImageUpload(file);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading image:', error);
-      setError('Please re-upload the photo to generate prompts');
+      setError(error.message || 'Failed to load image. Please check the URL and try again.');
     }
   };
 
