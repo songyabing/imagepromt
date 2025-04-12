@@ -39,9 +39,9 @@ app.add_middleware(
 # Hugging Face API 配置
 HF_TOKEN = "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"
 
-def call_huggingface_api(api_url: str, image_data: bytes, max_retries: int = 3) -> dict:
+def call_huggingface_api(api_url: str, image_data: bytes, max_retries: int = 5) -> dict:
     """
-    调用 Hugging Face API 的通用函数，包含重试机制
+    调用 Hugging Face API 的通用函数，包含重试机制和增强的错误处理
     """
     # 将图片转换为base64编码
     encoded_image = base64.b64encode(image_data).decode('utf-8')
@@ -65,18 +65,45 @@ def call_huggingface_api(api_url: str, image_data: bytes, max_retries: int = 3) 
                 api_url, 
                 headers=headers, 
                 json=payload,  # 使用json参数而不是data
-                timeout=30
+                timeout=60  # 增加超时时间到60秒
             )
             
+            # 打印响应状态和头信息
+            print(f"API响应状态码: {response.status_code}")
+            print(f"API响应头: {response.headers}")
+            
             if response.status_code == 503:
+                print(f"服务暂时不可用 (503)，响应内容: {response.text}")
                 if attempt < max_retries - 1:
-                    print(f"服务暂时不可用，{retry_delay}秒后重试...")
+                    print(f"将在 {retry_delay}秒后重试...")
                     time.sleep(retry_delay)
                     retry_delay *= 2  # 指数退避
                     continue
             
+            # 检查其他可重试的状态码
+            if response.status_code in [429, 502, 504]:
+                print(f"收到可重试的状态码 {response.status_code}，响应内容: {response.text}")
+                if attempt < max_retries - 1:
+                    print(f"将在 {retry_delay}秒后重试...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                    continue
+            
             response.raise_for_status()
-            result = response.json()
+            
+            # 尝试解析JSON响应
+            try:
+                result = response.json()
+                print(f"API响应JSON成功解析: {result}")
+            except Exception as e:
+                print(f"API响应JSON解析失败: {str(e)}, 原始响应: {response.text}")
+                if attempt < max_retries - 1:
+                    print(f"将在 {retry_delay}秒后重试...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                    continue
+                else:
+                    raise HTTPException(status_code=502, detail="Invalid API response format")
             
             if isinstance(result, list) and len(result) > 0:
                 return result[0]
@@ -84,16 +111,18 @@ def call_huggingface_api(api_url: str, image_data: bytes, max_retries: int = 3) 
                 return result  # 返回任何格式的响应
                 
         except requests.Timeout:
+            print(f"请求超时，已经尝试 {attempt + 1}/{max_retries}")
             if attempt < max_retries - 1:
-                print(f"请求超时，{retry_delay}秒后重试...")
+                print(f"将在 {retry_delay}秒后重试...")
                 time.sleep(retry_delay)
                 retry_delay *= 2
                 continue
             raise HTTPException(status_code=504, detail="请求超时")
             
         except requests.HTTPError as e:
-            if attempt < max_retries - 1 and response.status_code in [503, 502, 500]:
-                print(f"HTTP错误 {response.status_code}，{retry_delay}秒后重试...")
+            print(f"HTTP错误: {str(e)}, 状态码: {response.status_code}, 响应: {response.text}")
+            if attempt < max_retries - 1 and response.status_code in [503, 502, 500, 429, 504]:
+                print(f"将在 {retry_delay}秒后重试...")
                 time.sleep(retry_delay)
                 retry_delay *= 2
                 continue
@@ -103,8 +132,9 @@ def call_huggingface_api(api_url: str, image_data: bytes, max_retries: int = 3) 
             )
             
         except Exception as e:
+            print(f"发生未知错误: {str(e)}, 类型: {type(e)}")
             if attempt < max_retries - 1:
-                print(f"发生错误: {str(e)}，{retry_delay}秒后重试...")
+                print(f"将在 {retry_delay}秒后重试...")
                 time.sleep(retry_delay)
                 retry_delay *= 2
                 continue
@@ -171,10 +201,21 @@ async def proxy_image(url: str = Query(...)):
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to fetch image: {str(e)}")
 
-        # 验证内容类型
+        # 验证内容类型 - 更宽容的检查
         content_type = response.headers.get('content-type', '')
-        if not content_type.startswith('image/'):
-            raise HTTPException(status_code=400, detail="URL does not point to a valid image")
+        
+        # 尝试通过文件内容判断图片类型
+        try:
+            img = Image.open(io.BytesIO(response.content))
+            actual_content_type = f"image/{img.format.lower()}" if img.format else "image/jpeg"
+            
+            # 使用通过内容检测到的MIME类型，而不是响应头中的类型
+            content_type = actual_content_type
+            print(f"检测到图片类型: {content_type}")
+        except Exception as e:
+            print(f"图片内容检测失败: {str(e)}")
+            if not content_type.startswith('image/'):
+                raise HTTPException(status_code=400, detail="URL does not point to a valid image")
 
         # 验证文件大小
         content_length = response.headers.get('content-length')
@@ -247,7 +288,30 @@ async def generate_joycaption(files: UploadFile = File(...), language: str = 'en
             if isinstance(result, dict):
                 caption = result.get('generated_text', '')
             elif isinstance(result, list) and len(result) > 0:
-                caption = result[0].get('generated_text', '')
+                if isinstance(result[0], dict):
+                    caption = result[0].get('generated_text', '')
+                elif isinstance(result[0], str):
+                    caption = result[0]
+            elif isinstance(result, str):
+                caption = result
+            
+            print(f"提取的caption: '{caption}'")
+            
+            if not caption:
+                print("API返回但没有生成描述，尝试使用备用方法解析")
+                # 尝试在整个响应中寻找描述
+                try:
+                    # 将结果转为字符串并查找
+                    result_str = str(result)
+                    import re
+                    # 尝试匹配常见的描述模式
+                    matches = re.findall(r'"([^"]+)"', result_str)
+                    if matches:
+                        # 使用最长的匹配作为caption
+                        caption = max(matches, key=len)
+                        print(f"通过正则表达式找到描述: {caption}")
+                except Exception as e:
+                    print(f"备用解析失败: {str(e)}")
             
             if not caption:
                 raise HTTPException(

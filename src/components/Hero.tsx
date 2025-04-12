@@ -236,25 +236,63 @@ export default function Hero() {
       setError('');
       console.log('Loading image from URL:', imageUrl);
       
-      const proxyUrl = `${API_BASE_URL}/api/proxy/image?url=${encodeURIComponent(imageUrl)}`;
+      // 添加更好的URL验证
+      let urlToLoad = imageUrl.trim();
+      
+      // 确保URL有协议
+      if (!urlToLoad.startsWith('http://') && !urlToLoad.startsWith('https://')) {
+        urlToLoad = 'https://' + urlToLoad;
+        console.log('Updated URL with protocol:', urlToLoad);
+      }
+      
+      const proxyUrl = `${API_BASE_URL}/api/proxy/image?url=${encodeURIComponent(urlToLoad)}`;
       console.log('Proxy URL:', proxyUrl);
       
       const response = await fetch(proxyUrl);
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        console.error('Proxy error:', errorData);
-        throw new Error(errorData.detail || 'Failed to load image');
+        console.error('Proxy error status:', response.status);
+        
+        // 尝试解析错误响应
+        let errorMessage = 'Failed to load image';
+        try {
+          const errorData = await response.json();
+          console.error('Proxy error details:', errorData);
+          errorMessage = errorData.detail || errorMessage;
+        } catch (e) {
+          console.error('Could not parse error response:', e);
+          // 如果无法解析JSON，尝试读取文本
+          errorMessage = await response.text() || errorMessage;
+        }
+        
+        throw new Error(errorMessage);
       }
 
       const contentType = response.headers.get('content-type');
-      if (!contentType || !contentType.startsWith('image/')) {
-        throw new Error('Invalid image type');
+      // 更宽容的内容类型检查
+      if (contentType) {
+        // 接受所有图片类型
+        if (!contentType.includes('image/')) {
+          console.error('Invalid content type:', contentType);
+          throw new Error('Invalid image type');
+        }
+      } else {
+        // 如果没有content-type，尝试通过响应内容判断
+        console.warn('No content-type in response, trying to handle as image anyway');
       }
 
-      const blob = await response.blob();
-      const file = new File([blob], 'image.jpg', { type: contentType });
-      console.log('Image loaded successfully');
-      handleImageUpload(file);
+      try {
+        const blob = await response.blob();
+        console.log('Blob size:', blob.size, 'type:', blob.type);
+        
+        // 使用更通用的mime类型或从blob中检测
+        const mimeType = blob.type || 'image/jpeg';
+        const file = new File([blob], 'image.jpg', { type: mimeType });
+        console.log('Image loaded successfully');
+        handleImageUpload(file);
+      } catch (error: any) {
+        console.error('Blob processing error:', error);
+        throw new Error('Invalid image data received');
+      }
     } catch (error: any) {
       console.error('Error loading image:', error);
       setError(error.message || 'Failed to load image. Please check the URL and try again.');
