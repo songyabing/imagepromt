@@ -239,16 +239,33 @@ export default function Hero() {
       // 添加更好的URL验证
       let urlToLoad = imageUrl.trim();
       
+      // 移除URL前面可能存在的@符号
+      if (urlToLoad.startsWith('@')) {
+        urlToLoad = urlToLoad.substring(1);
+        console.log('Removed @ symbol from URL:', urlToLoad);
+      }
+      
       // 确保URL有协议
       if (!urlToLoad.startsWith('http://') && !urlToLoad.startsWith('https://')) {
         urlToLoad = 'https://' + urlToLoad;
         console.log('Updated URL with protocol:', urlToLoad);
       }
       
+      // 尝试检查URL是否包含图片扩展名
+      const hasImageExtension = /\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(urlToLoad);
+      if (!hasImageExtension) {
+        console.warn('URL does not end with a common image extension:', urlToLoad);
+      }
+      
       const proxyUrl = `${API_BASE_URL}/api/proxy/image?url=${encodeURIComponent(urlToLoad)}`;
       console.log('Proxy URL:', proxyUrl);
       
-      const response = await fetch(proxyUrl);
+      const response = await fetch(proxyUrl, {
+        method: 'GET',
+        // 增加超时设置
+        signal: AbortSignal.timeout(30000) // 30秒超时
+      });
+      
       if (!response.ok) {
         console.error('Proxy error status:', response.status);
         
@@ -261,13 +278,21 @@ export default function Hero() {
         } catch (e) {
           console.error('Could not parse error response:', e);
           // 如果无法解析JSON，尝试读取文本
-          errorMessage = await response.text() || errorMessage;
+          try {
+            const textResponse = await response.text();
+            console.error('Error response text:', textResponse);
+            errorMessage = textResponse || errorMessage;
+          } catch (textError) {
+            console.error('Could not get response text:', textError);
+          }
         }
         
         throw new Error(errorMessage);
       }
 
       const contentType = response.headers.get('content-type');
+      console.log('Response content type:', contentType);
+      
       // 更宽容的内容类型检查
       if (contentType) {
         // 接受所有图片类型
@@ -283,6 +308,10 @@ export default function Hero() {
       try {
         const blob = await response.blob();
         console.log('Blob size:', blob.size, 'type:', blob.type);
+        
+        if (blob.size === 0) {
+          throw new Error('Received empty image data');
+        }
         
         // 使用更通用的mime类型或从blob中检测
         const mimeType = blob.type || 'image/jpeg';

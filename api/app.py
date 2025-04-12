@@ -183,6 +183,11 @@ def translate_to_english(text: str) -> str:
 @app.get("/api/proxy/image")
 async def proxy_image(url: str = Query(...)):
     try:
+        # 移除URL前面可能存在的@符号
+        if url.startswith('@'):
+            url = url[1:]
+            print(f"移除了URL中的@符号")
+        
         # 验证URL
         if not url.startswith(('http://', 'https://')):
             raise HTTPException(status_code=400, detail="Invalid URL scheme")
@@ -193,17 +198,22 @@ async def proxy_image(url: str = Query(...)):
         }
 
         try:
-            response = requests.get(url, headers=headers, timeout=10, stream=True)
+            print(f"开始请求图片: {url}")
+            response = requests.get(url, headers=headers, timeout=15, stream=True)
             response.raise_for_status()
+            print(f"图片请求成功，状态码: {response.status_code}")
         except requests.Timeout:
             raise HTTPException(status_code=504, detail="Image fetch timeout")
         except requests.HTTPError as e:
+            print(f"HTTP错误: {str(e)}")
             raise HTTPException(status_code=e.response.status_code, detail=f"Failed to fetch image: {str(e)}")
         except Exception as e:
+            print(f"请求失败: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Failed to fetch image: {str(e)}")
 
         # 验证内容类型 - 更宽容的检查
         content_type = response.headers.get('content-type', '')
+        print(f"原始内容类型: {content_type}")
         
         # 尝试通过文件内容判断图片类型
         try:
@@ -212,11 +222,17 @@ async def proxy_image(url: str = Query(...)):
             
             # 使用通过内容检测到的MIME类型，而不是响应头中的类型
             content_type = actual_content_type
-            print(f"检测到图片类型: {content_type}")
+            print(f"检测到图片类型: {content_type}, 格式: {img.format}")
         except Exception as e:
             print(f"图片内容检测失败: {str(e)}")
             if not content_type.startswith('image/'):
-                raise HTTPException(status_code=400, detail="URL does not point to a valid image")
+                # 尝试通过文件扩展名判断
+                if url.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp')):
+                    print("通过文件扩展名判断为图片")
+                    ext = url.split('.')[-1].lower()
+                    content_type = f"image/{ext}"
+                else:
+                    raise HTTPException(status_code=400, detail="URL does not point to a valid image")
 
         # 验证文件大小
         content_length = response.headers.get('content-length')
@@ -235,6 +251,7 @@ async def proxy_image(url: str = Query(...)):
     except HTTPException:
         raise
     except Exception as e:
+        print(f"代理图片失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @app.post("/api/joycaption/upload")
@@ -432,9 +449,70 @@ async def generate_interrogator(files: UploadFile = File(...), language: str = '
         print(f"发生错误: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/test/image")
+async def test_image_url(url: str = Query(...)):
+    """
+    测试图片URL并返回详细信息，用于诊断
+    """
+    try:
+        # 首先移除可能的@符号
+        if url.startswith('@'):
+            cleaned_url = url[1:]
+            print(f"移除了URL中的@符号: {url} -> {cleaned_url}")
+            url = cleaned_url
+            
+        # 验证URL
+        if not url.startswith(('http://', 'https://')):
+            return {"error": "Invalid URL scheme", "url": url}
+
+        # 设置请求头
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+
+        # 尝试获取URL响应
+        try:
+            response = requests.get(url, headers=headers, timeout=15, stream=True)
+            status_code = response.status_code
+            headers_dict = dict(response.headers)
+            content_type = response.headers.get('content-type', 'unknown')
+            content_length = response.headers.get('content-length', 'unknown')
+            
+            # 尝试判断内容
+            image_detected = False
+            image_format = "unknown"
+            error_message = None
+            
+            try:
+                img = Image.open(io.BytesIO(response.content))
+                image_detected = True
+                image_format = img.format
+            except Exception as e:
+                error_message = str(e)
+            
+            return {
+                "url": url,
+                "status_code": status_code,
+                "headers": headers_dict,
+                "content_type": content_type,
+                "content_length": content_length,
+                "image_detected": image_detected,
+                "image_format": image_format,
+                "error_message": error_message
+            }
+            
+        except Exception as e:
+            return {"error": str(e), "url": url}
+            
+    except Exception as e:
+        return {"error": str(e), "url": url}
+
 @app.get("/api/health")
 async def health_check():
-    return {"status": "ok"}
+    """
+    健康检查端点
+    """
+    return {"status": "ok", "version": "1.0.1"}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8088)
