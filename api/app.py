@@ -29,7 +29,8 @@ app.add_middleware(
         "https://www.imageprompt.vip",
         "https://imageprompt.vip",
         "http://localhost:3000",
-        "https://imagepromt.vercel.app"
+        "https://imageprompt.vercel.app",
+        "https://imageprompt-production.up.railway.app"
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -430,6 +431,10 @@ async def generate_interrogator(files: UploadFile = File(...), language: str = '
     except Exception as e:
         print(f"发生错误: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/health")
+async def health_check():
+    return {"status": "ok"}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8088)
