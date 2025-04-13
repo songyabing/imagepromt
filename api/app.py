@@ -258,117 +258,137 @@ async def proxy_image(url: str = Query(...)):
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @app.post("/api/joycaption/upload")
-async def upload_joycaption(files: UploadFile = File(...), language: str = Form('en')):
+async def upload_joycaption(files: List[UploadFile] = File(...), language: str = Form(...)):
     try:
-        print(f"接收到JoyCaption请求，语言: {language}")
+        print(f"接收到新的JoyCaption请求，语言: {language}")
         start_time = time.time()  # 记录开始时间
         
+        if not files:
+            raise HTTPException(status_code=400, detail="No files provided")
+        
+        file = files[0]
+        print(f"处理文件: {file.filename}, 内容类型: {file.content_type}")
+        
+        # 验证文件类型
+        if not file.content_type.startswith('image/'):
+            print(f"无效的文件类型: {file.content_type}")
+            raise HTTPException(status_code=400, detail="Only image files are supported")
+        
         # 读取文件内容
-        contents = await files.read()
-        if len(contents) == 0:
-            raise HTTPException(status_code=400, detail="Empty file")
-        
-        print(f"文件大小: {len(contents) / 1024:.2f} KB")
-        
-        # 将图像转换为base64
         try:
-            img = Image.open(io.BytesIO(contents))
-            print(f"图像格式: {img.format}, 大小: {img.size}")
-            buffered = io.BytesIO()
-            img.save(buffered, format=img.format)
-            img_str = base64.b64encode(buffered.getvalue()).decode()
-        except Exception as e:
-            print(f"图像处理错误: {str(e)}")
-            raise HTTPException(status_code=400, detail=f"Invalid image: {str(e)}")
+            content = await file.read()
+            file_size = len(content)
+            print(f"图片大小: {file_size / 1024:.2f} KB")
             
-        print("图像转换为base64成功")
-        
-        # 调用Hugging Face API
-        API_URL = "https://api-inference.huggingface.co/models/joytag/JoyCaption"
-        headers = {"Authorization": f"Bearer {HUGGINGFACE_TOKEN}"}
-        payload = {"inputs": {"image": img_str, "language": language}}
-        
-        print("开始请求HuggingFace API...")
-        
-        # 增加重试和超时设置
-        max_retries = 3
-        retry_count = 0
-        timeout_value = 50  # 增加超时时间到50秒
-        
-        while retry_count < max_retries:
+            if file_size > 10 * 1024 * 1024:  # 10MB
+                raise HTTPException(status_code=400, detail="File size exceeds 10MB limit")
+            
+            if file_size == 0:
+                raise HTTPException(status_code=400, detail="Empty file")
+                
+            # 使用PIL验证图片格式
             try:
-                response = requests.post(
-                    API_URL, 
-                    headers=headers, 
-                    json=payload,
-                    timeout=timeout_value
-                )
-                print(f"API响应状态码: {response.status_code}")
-                
-                if response.status_code == 200:
-                    try:
-                        result = response.json()
-                        
-                        # 增强对不同响应格式的处理
-                        caption = ""
-                        if isinstance(result, list) and len(result) > 0:
-                            if isinstance(result[0], dict):
-                                caption = result[0].get('caption', result[0].get('generated_text', ''))
-                            elif isinstance(result[0], str):
-                                caption = result[0]
-                        elif isinstance(result, dict):
-                            caption = result.get('caption', result.get('generated_text', ''))
-                        
-                        print(f"解析到的描述: {caption}")
-                        
-                        if not caption:
-                            print("未从API响应中解析到描述")
-                            raise HTTPException(status_code=500, detail="No caption in API response")
-                            
-                        elapsed_time = time.time() - start_time
-                        print(f"请求完成，总耗时: {elapsed_time:.2f}秒")
-                        return {"caption": caption, "elapsed_time": elapsed_time}
-                    except ValueError as e:
-                        print(f"无法解析JSON响应: {str(e)}")
-                        print(f"原始响应: {response.text}")
-                        raise HTTPException(status_code=500, detail=f"Failed to parse API response: {str(e)}")
-                elif response.status_code == 503:
-                    # 模型正在加载，尝试重试
-                    retry_count += 1
-                    wait_time = 2 ** retry_count  # 指数退避
-                    print(f"模型正在加载，等待{wait_time}秒后重试 ({retry_count}/{max_retries})")
-                    time.sleep(wait_time)
-                else:
-                    print(f"API错误，状态码: {response.status_code}")
-                    try:
-                        error_msg = response.json()
-                        print(f"错误详情: {error_msg}")
-                    except:
-                        error_msg = response.text
-                        print(f"错误响应: {error_msg}")
-                    
-                    raise HTTPException(
-                        status_code=response.status_code, 
-                        detail=f"API error: {error_msg}"
-                    )
-            except requests.exceptions.Timeout:
-                retry_count += 1
-                if retry_count >= max_retries:
-                    print(f"请求超时，已达到最大重试次数 {max_retries}")
-                    raise HTTPException(status_code=504, detail="API request timed out after multiple retries")
-                
-                wait_time = 2 ** retry_count
-                print(f"请求超时，等待{wait_time}秒后重试 ({retry_count}/{max_retries})")
-                time.sleep(wait_time)
+                img = Image.open(io.BytesIO(content))
+                img_format = img.format
+                img_size = img.size
+                print(f"图片格式: {img_format}, 尺寸: {img_size}")
             except Exception as e:
-                print(f"请求出错: {str(e)}")
-                raise HTTPException(status_code=500, detail=f"Error calling API: {str(e)}")
-        
-        # 如果达到最大重试次数仍未成功
-        raise HTTPException(status_code=500, detail="Failed after maximum retries")
-    except HTTPException as e:
-        # 重新抛出HTTP异常
-        print(f"HTTP异常: {e.detail}")
+                print(f"图片验证失败: {str(e)}")
+                raise HTTPException(status_code=400, detail=f"Invalid image: {str(e)}")
+                
+            # 转换为base64
+            base64_str = base64.b64encode(content).decode('utf-8')
+            print("图片已成功转换为base64")
+            
+            # 调用Hugging Face API
+            API_URL = "https://api-inference.huggingface.co/models/joytag/JoyCaption"
+            headers = {"Authorization": f"Bearer {HUGGINGFACE_TOKEN}"}
+            payload = {"inputs": {"image": base64_str, "language": language}}
+            
+            print("开始请求HuggingFace API...")
+            
+            # 增加重试和超时设置
+            max_retries = 3
+            retry_count = 0
+            timeout_value = 50  # 增加超时时间到50秒
+            
+            while retry_count < max_retries:
+                try:
+                    response = requests.post(
+                        API_URL, 
+                        headers=headers, 
+                        json=payload,
+                        timeout=timeout_value
+                    )
+                    print(f"API响应状态码: {response.status_code}")
+                    
+                    if response.status_code == 200:
+                        try:
+                            result = response.json()
+                            
+                            # 增强对不同响应格式的处理
+                            caption = ""
+                            if isinstance(result, list) and len(result) > 0:
+                                if isinstance(result[0], dict):
+                                    caption = result[0].get('caption', result[0].get('generated_text', ''))
+                                elif isinstance(result[0], str):
+                                    caption = result[0]
+                            elif isinstance(result, dict):
+                                caption = result.get('caption', result.get('generated_text', ''))
+                            
+                            print(f"解析到的描述: {caption}")
+                            
+                            if not caption:
+                                print("未从API响应中解析到描述")
+                                raise HTTPException(status_code=500, detail="No caption in API response")
+                                
+                            elapsed_time = time.time() - start_time
+                            print(f"请求完成，总耗时: {elapsed_time:.2f}秒")
+                            return {"caption": caption, "elapsed_time": elapsed_time}
+                        except ValueError as e:
+                            print(f"无法解析JSON响应: {str(e)}")
+                            print(f"原始响应: {response.text}")
+                            raise HTTPException(status_code=500, detail=f"Failed to parse API response: {str(e)}")
+                    elif response.status_code == 503:
+                        # 模型正在加载，尝试重试
+                        retry_count += 1
+                        wait_time = 2 ** retry_count  # 指数退避
+                        print(f"模型正在加载，等待{wait_time}秒后重试 ({retry_count}/{max_retries})")
+                        time.sleep(wait_time)
+                    else:
+                        print(f"API错误，状态码: {response.status_code}")
+                        try:
+                            error_msg = response.json()
+                            print(f"错误详情: {error_msg}")
+                        except:
+                            error_msg = response.text
+                            print(f"错误响应: {error_msg}")
+                        
+                        raise HTTPException(
+                            status_code=response.status_code, 
+                            detail=f"API error: {error_msg}"
+                        )
+                except requests.exceptions.Timeout:
+                    retry_count += 1
+                    if retry_count >= max_retries:
+                        print(f"请求超时，已达到最大重试次数 {max_retries}")
+                        raise HTTPException(status_code=504, detail="API request timed out after multiple retries")
+                    
+                    wait_time = 2 ** retry_count
+                    print(f"请求超时，等待{wait_time}秒后重试 ({retry_count}/{max_retries})")
+                    time.sleep(wait_time)
+                except Exception as e:
+                    print(f"请求出错: {str(e)}")
+                    raise HTTPException(status_code=500, detail=f"Error calling API: {str(e)}")
+            
+            # 如果达到最大重试次数仍未成功
+            raise HTTPException(status_code=500, detail="Failed after maximum retries")
+            
+        except Exception as e:
+            print(f"文件处理错误: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
+            
+    except HTTPException:
         raise
     except Exception as e:
         # 捕获所有其他异常
