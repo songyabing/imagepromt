@@ -64,41 +64,84 @@ export default function Hero() {
       formData.append('language', 'en');
       
       console.log('Sending request to JoyCaption API...');
-      const response = await axios.post(
-        `${API_BASE_URL}/api/joycaption/upload`,
-        formData,
-        {
-          headers: {
-            'Content-Type': 'multipart/form-data',
-          },
-          timeout: 120000,
-          timeoutErrorMessage: 'Request timed out, please try again',
-          maxContentLength: maxSize,
-          maxBodyLength: maxSize,
-          validateStatus: function (status) {
-            return status >= 200 && status < 500;
+      console.log(`File size: ${(imageFile.size / 1024).toFixed(2)}KB, File type: ${imageFile.type}`);
+      
+      // 记录当前时间，用于计算请求耗时
+      const startTime = new Date().getTime();
+      
+      console.log(`API endpoint: ${API_BASE_URL}/api/joycaption/upload`);
+      
+      try {
+        // 设置更长的超时时间，生产环境可能需要更长的处理时间
+        const response = await axios.post(
+          `${API_BASE_URL}/api/joycaption/upload`,
+          formData,
+          {
+            headers: {
+              'Content-Type': 'multipart/form-data',
+            },
+            timeout: 90000, // 增加到90秒，考虑到HuggingFace模型加载时间
+            timeoutErrorMessage: 'Request timed out, please try again later',
+            maxContentLength: maxSize,
+            maxBodyLength: maxSize,
+            validateStatus: function (status) {
+              return status >= 200 && status < 500;
+            }
           }
+        );
+        
+        const endTime = new Date().getTime();
+        console.log(`API request completed in ${endTime - startTime}ms`);
+        console.log('JoyCaption API response:', response.data);
+
+        if (response.status >= 400) {
+          console.error('API error:', response.data);
+          throw new Error(response.data?.detail || 'Failed to generate prompt');
         }
-      );
-      console.log('JoyCaption API response:', response.data);
 
-      if (response.status >= 400) {
-        console.error('API error:', response.data);
-        throw new Error(response.data?.detail || 'Failed to generate prompt');
-      }
-
-      if (response.data?.caption) {
-        return response.data.caption;
-      } else {
-        console.error('No caption in response:', response.data);
-        setError('No caption generated. Please try again with a different image.');
-        return '';
+        if (response.data?.caption) {
+          return response.data.caption;
+        } else {
+          console.error('No caption in response:', response.data);
+          setError('No caption generated. Please try again with a different image.');
+          return '';
+        }
+      } catch (axiosError) {
+        // 添加专门针对超时的处理
+        const endTime = new Date().getTime();
+        const elapsedTime = endTime - startTime;
+        console.error(`API request failed after ${elapsedTime}ms`);
+        
+        if (axios.isAxiosError(axiosError)) {
+          // 处理网络错误
+          if (axiosError.code === 'ECONNABORTED') {
+            console.error('Request timeout error');
+            throw new Error('Request timed out. The server is taking too long to respond. Please try with a smaller image or try again later.');
+          } else if (axiosError.response) {
+            // 服务器返回了错误状态码
+            console.error(`Server error with status: ${axiosError.response.status}`);
+            console.error('Response data:', axiosError.response.data);
+            throw axiosError;
+          } else if (axiosError.request) {
+            // 请求已发送但没有收到响应
+            console.error('No response received from server');
+            throw new Error('No response from server. Please check your connection and try again.');
+          } else {
+            // 其他类型的错误
+            console.error('Error details:', axiosError.message);
+            throw axiosError;
+          }
+        } else {
+          // 非Axios错误
+          console.error('Non-Axios error:', axiosError);
+          throw axiosError;
+        }
       }
     } catch (error: any) {
       console.error('Full error object:', error);
       if (axios.isAxiosError(error)) {
         if (error.code === 'ECONNABORTED') {
-          setError('Request timed out. Please try again.');
+          setError('Request timed out. Please try again later or use a smaller image.');
         } else if (error.response) {
           const errorMessage = error.response.data?.detail || 'Server error. Please try again.';
           console.error('Server error response:', error.response.data);
