@@ -18,10 +18,9 @@ import re
 # 加载环境变量
 load_dotenv()
 
-# 获取 HuggingFace API Token
-HUGGINGFACE_TOKEN = os.getenv('HUGGINGFACE_TOKEN')
-if not HUGGINGFACE_TOKEN:
-    print("警告：未设置 HUGGINGFACE_TOKEN 环境变量，翻译功能可能无法正常工作")
+# 直接硬编码HuggingFace API Token
+HUGGINGFACE_TOKEN =  "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"
+print("使用硬编码的HUGGINGFACE_TOKEN进行API调用")
 
 app = FastAPI()
 
@@ -153,7 +152,7 @@ def translate_to_chinese(text: str) -> str:
     try:
         print(f"正在翻译文本为中文: {text}")
         translate_url = "https://api-inference.huggingface.co/models/Helsinki-NLP/opus-mt-en-zh"
-        headers = {"Authorization": f"Bearer {os.getenv('HUGGINGFACE_TOKEN')}"}
+        headers = {"Authorization": f"Bearer {HUGGINGFACE_TOKEN}"}
         response = requests.post(translate_url, headers=headers, json={"inputs": text})
         response.raise_for_status()
         result = response.json()
@@ -171,7 +170,7 @@ def translate_to_english(text: str) -> str:
     try:
         print(f"正在翻译文本为英文: {text}")
         translate_url = "https://api-inference.huggingface.co/models/Helsinki-NLP/opus-mt-zh-en"
-        headers = {"Authorization": f"Bearer {os.getenv('HUGGINGFACE_TOKEN')}"}
+        headers = {"Authorization": f"Bearer {HUGGINGFACE_TOKEN}"}
         response = requests.post(translate_url, headers=headers, json={"inputs": text})
         response.raise_for_status()
         result = response.json()
