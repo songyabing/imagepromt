@@ -194,60 +194,137 @@ async def proxy_image(url: str = Query(...)):
         if not url.startswith(('http://', 'https://')):
             raise HTTPException(status_code=400, detail="Invalid URL scheme")
 
-        # 设置请求头
+        # 添加更丰富的请求头，模拟真实浏览器行为
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'Pragma': 'no-cache',
+            'Referer': 'https://imageprompt.vip/',
+            'Sec-Fetch-Dest': 'image',
+            'Sec-Fetch-Mode': 'no-cors',
+            'Sec-Fetch-Site': 'cross-site'
         }
 
         try:
-            print(f"开始请求图片: {url}")
-            response = requests.get(url, headers=headers, timeout=15, stream=True)
+            # 记录详细日志，帮助诊断问题
+            print(f"开始请求图片URL: {url}")
+            print(f"请求头: {headers}")
+            
+            # 使用会话来处理cookies和重定向
+            session = requests.Session()
+            response = session.get(
+                url, 
+                headers=headers, 
+                timeout=20,  # 增加超时时间
+                stream=True,
+                allow_redirects=True,  # 允许重定向
+                verify=True  # SSL验证
+            )
+            
+            # 记录响应信息
+            print(f"响应状态码: {response.status_code}")
+            print(f"响应头: {dict(response.headers)}")
+            print(f"响应URL(可能重定向): {response.url}")
+            
             response.raise_for_status()
-            print(f"图片请求成功，状态码: {response.status_code}")
+            print(f"图片请求成功")
         except requests.Timeout:
+            print(f"请求超时: {url}")
             raise HTTPException(status_code=504, detail="Image fetch timeout")
+        except requests.TooManyRedirects:
+            print(f"重定向过多: {url}")
+            raise HTTPException(status_code=400, detail="Too many redirects")
+        except requests.SSLError as e:
+            print(f"SSL错误: {str(e)}")
+            # 尝试不验证SSL
+            try:
+                print("尝试不验证SSL重新请求...")
+                response = session.get(url, headers=headers, timeout=20, stream=True, verify=False)
+                response.raise_for_status()
+                print("不验证SSL的请求成功")
+            except Exception as retry_e:
+                print(f"不验证SSL的重试也失败: {str(retry_e)}")
+                raise HTTPException(status_code=502, detail=f"SSL Error: {str(e)}")
         except requests.HTTPError as e:
             print(f"HTTP错误: {str(e)}")
-            raise HTTPException(status_code=e.response.status_code, detail=f"Failed to fetch image: {str(e)}")
+            raise HTTPException(
+                status_code=e.response.status_code, 
+                detail=f"Failed to fetch image: {str(e)}"
+            )
         except Exception as e:
-            print(f"请求失败: {str(e)}")
+            print(f"请求失败: {str(e)}, 类型: {type(e)}")
             raise HTTPException(status_code=500, detail=f"Failed to fetch image: {str(e)}")
 
         # 验证内容类型 - 更宽容的检查
         content_type = response.headers.get('content-type', '')
         print(f"原始内容类型: {content_type}")
         
+        # 读取内容
+        content = response.content
+        if not content:
+            print("响应内容为空")
+            raise HTTPException(status_code=400, detail="Empty response")
+            
+        print(f"响应内容大小: {len(content)} bytes")
+        
         # 尝试通过文件内容判断图片类型
         try:
-            img = Image.open(io.BytesIO(response.content))
+            img = Image.open(io.BytesIO(content))
             actual_content_type = f"image/{img.format.lower()}" if img.format else "image/jpeg"
             
             # 使用通过内容检测到的MIME类型，而不是响应头中的类型
             content_type = actual_content_type
-            print(f"检测到图片类型: {content_type}, 格式: {img.format}")
+            print(f"检测到图片类型: {content_type}, 格式: {img.format}, 尺寸: {img.size}")
+            
+            # 如果图片太大，进行压缩处理
+            if len(content) > 5 * 1024 * 1024:  # 如果大于5MB
+                print("图片过大，进行压缩处理")
+                # 将大图片缩小到合理尺寸
+                max_size = (1200, 1200)
+                img.thumbnail(max_size)
+                
+                # 压缩质量
+                output = io.BytesIO()
+                if img.format == 'JPEG' or img.format == 'JPG':
+                    img.save(output, format=img.format, quality=85)
+                elif img.format == 'PNG':
+                    img.save(output, format=img.format, optimize=True)
+                else:
+                    img.save(output, format=img.format)
+                
+                content = output.getvalue()
+                print(f"压缩后大小: {len(content)} bytes")
         except Exception as e:
-            print(f"图片内容检测失败: {str(e)}")
+            print(f"图片内容检测/处理失败: {str(e)}")
             if not content_type.startswith('image/'):
                 # 尝试通过文件扩展名判断
-                if url.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp')):
+                if url.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg')):
                     print("通过文件扩展名判断为图片")
                     ext = url.split('.')[-1].lower()
                     content_type = f"image/{ext}"
                 else:
+                    print("无法确定内容是图片")
                     raise HTTPException(status_code=400, detail="URL does not point to a valid image")
 
         # 验证文件大小
-        content_length = response.headers.get('content-length')
-        if content_length and int(content_length) > 10 * 1024 * 1024:  # 10MB
+        if len(content) > 10 * 1024 * 1024:  # 10MB
+            print("图片大小超过限制")
             raise HTTPException(status_code=400, detail="Image size exceeds 10MB limit")
 
         # 返回图片内容
+        print("返回图片内容")
         return Response(
-            content=response.content,
+            content=content,
             media_type=content_type,
             headers={
                 'Cache-Control': 'public, max-age=31536000',
-                'Access-Control-Allow-Origin': '*'
+                'Access-Control-Allow-Origin': '*',
+                'X-Image-Source': url,
+                'X-Image-Size': str(len(content))
             }
         )
     except HTTPException:
@@ -675,6 +752,229 @@ async def query_huggingface(base64_image):
     
     # 如果出现意外情况导致循环结束但没有返回，使用默认值
     return "An image"
+
+@app.get("/api/debug/image")
+async def debug_image_url(url: str = Query(...)):
+    """
+    详细调试图片URL，测试不同的请求方法并返回完整诊断信息
+    """
+    try:
+        print(f"\n[DEBUG] 开始诊断URL: {url}")
+        
+        # 移除URL前面可能存在的@符号
+        if url.startswith('@'):
+            url = url[1:]
+            print(f"[DEBUG] 移除了URL中的@符号，现在是: {url}")
+        
+        # 验证URL
+        if not url.startswith(('http://', 'https://')):
+            return {"status": "error", "message": "Invalid URL scheme", "url": url}
+
+        result = {
+            "url": url,
+            "tests": [],
+            "successful_method": None,
+            "image_detected": False,
+            "image_info": None,
+            "content_preview": None
+        }
+        
+        # 测试方法1：基本请求
+        try:
+            print("[DEBUG] 测试方法1：基本请求")
+            response = requests.get(url, timeout=10)
+            test_result = {
+                "method": "basic",
+                "status_code": response.status_code,
+                "content_type": response.headers.get('content-type'),
+                "content_length": len(response.content),
+                "success": response.status_code == 200
+            }
+            
+            if test_result["success"]:
+                try:
+                    img = Image.open(io.BytesIO(response.content))
+                    test_result["image_detected"] = True
+                    test_result["image_format"] = img.format
+                    test_result["image_size"] = img.size
+                    result["image_detected"] = True
+                    result["image_info"] = {
+                        "format": img.format,
+                        "size": img.size,
+                        "mode": img.mode
+                    }
+                    result["successful_method"] = "basic"
+                except Exception as e:
+                    test_result["image_detected"] = False
+                    test_result["image_error"] = str(e)
+            
+            result["tests"].append(test_result)
+        except Exception as e:
+            result["tests"].append({
+                "method": "basic",
+                "error": str(e),
+                "success": False
+            })
+        
+        # 测试方法2：带浏览器头的请求
+        try:
+            print("[DEBUG] 测试方法2：带浏览器头的请求")
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+                'Referer': 'https://imageprompt.vip/'
+            }
+            response = requests.get(url, headers=headers, timeout=10)
+            test_result = {
+                "method": "browser_headers",
+                "status_code": response.status_code,
+                "content_type": response.headers.get('content-type'),
+                "content_length": len(response.content),
+                "success": response.status_code == 200
+            }
+            
+            if test_result["success"] and not result["image_detected"]:
+                try:
+                    img = Image.open(io.BytesIO(response.content))
+                    test_result["image_detected"] = True
+                    test_result["image_format"] = img.format
+                    test_result["image_size"] = img.size
+                    result["image_detected"] = True
+                    result["image_info"] = {
+                        "format": img.format,
+                        "size": img.size,
+                        "mode": img.mode
+                    }
+                    result["successful_method"] = "browser_headers"
+                except Exception as e:
+                    test_result["image_detected"] = False
+                    test_result["image_error"] = str(e)
+            
+            result["tests"].append(test_result)
+        except Exception as e:
+            result["tests"].append({
+                "method": "browser_headers",
+                "error": str(e),
+                "success": False
+            })
+        
+        # 测试方法3：带会话的请求
+        try:
+            print("[DEBUG] 测试方法3：带会话的请求")
+            session = requests.Session()
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
+            }
+            response = session.get(url, headers=headers, timeout=10, allow_redirects=True)
+            test_result = {
+                "method": "session",
+                "status_code": response.status_code,
+                "content_type": response.headers.get('content-type'),
+                "content_length": len(response.content),
+                "final_url": str(response.url),  # 记录可能重定向后的URL
+                "success": response.status_code == 200
+            }
+            
+            if test_result["success"] and not result["image_detected"]:
+                try:
+                    img = Image.open(io.BytesIO(response.content))
+                    test_result["image_detected"] = True
+                    test_result["image_format"] = img.format
+                    test_result["image_size"] = img.size
+                    result["image_detected"] = True
+                    result["image_info"] = {
+                        "format": img.format,
+                        "size": img.size,
+                        "mode": img.mode
+                    }
+                    result["successful_method"] = "session"
+                except Exception as e:
+                    test_result["image_detected"] = False
+                    test_result["image_error"] = str(e)
+            
+            result["tests"].append(test_result)
+        except Exception as e:
+            result["tests"].append({
+                "method": "session",
+                "error": str(e),
+                "success": False
+            })
+
+        # 测试方法4：不验证SSL的请求
+        try:
+            print("[DEBUG] 测试方法4：不验证SSL的请求")
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+            response = requests.get(url, headers=headers, timeout=10, verify=False)
+            test_result = {
+                "method": "no_ssl_verify",
+                "status_code": response.status_code,
+                "content_type": response.headers.get('content-type'),
+                "content_length": len(response.content),
+                "success": response.status_code == 200
+            }
+            
+            if test_result["success"] and not result["image_detected"]:
+                try:
+                    img = Image.open(io.BytesIO(response.content))
+                    test_result["image_detected"] = True
+                    test_result["image_format"] = img.format
+                    test_result["image_size"] = img.size
+                    result["image_detected"] = True
+                    result["image_info"] = {
+                        "format": img.format,
+                        "size": img.size,
+                        "mode": img.mode
+                    }
+                    result["successful_method"] = "no_ssl_verify"
+                except Exception as e:
+                    test_result["image_detected"] = False
+                    test_result["image_error"] = str(e)
+            
+            result["tests"].append(test_result)
+        except Exception as e:
+            result["tests"].append({
+                "method": "no_ssl_verify",
+                "error": str(e),
+                "success": False
+            })
+            
+        # 对于成功的方法，保存少量内容预览（用于检查是否真的是图片）
+        if result["successful_method"]:
+            # 找到成功的测试
+            for test in result["tests"]:
+                if test.get("method") == result["successful_method"]:
+                    # 仅保存前100字节的十六进制表示，用于检查文件头
+                    if "content_length" in test and test["content_length"] > 0:
+                        for response in [r for r in [requests.get(url, timeout=10, stream=True)] if r.status_code == 200]:
+                            content_preview = response.content[:100].hex()
+                            result["content_preview"] = content_preview
+                            # 分析文件头以确认是否为图片
+                            is_jpg = content_preview.startswith("ffd8")
+                            is_png = content_preview.startswith("89504e47")
+                            is_gif = content_preview.startswith("474946")
+                            is_webp = "57454250" in content_preview[:24]
+                            result["file_signatures"] = {
+                                "is_jpg": is_jpg,
+                                "is_png": is_png, 
+                                "is_gif": is_gif,
+                                "is_webp": is_webp
+                            }
+                            break
+                    break
+
+        print(f"[DEBUG] 诊断完成: 检测到图片 = {result['image_detected']}, 成功方法 = {result['successful_method']}")
+        return result
+            
+    except Exception as e:
+        print(f"[DEBUG] 总体诊断失败: {str(e)}")
+        return {
+            "status": "error",
+            "message": f"诊断过程中发生错误: {str(e)}",
+            "url": url
+        }
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8088)
