@@ -41,7 +41,7 @@ export default function Hero() {
   };
 
   // API基础URL配置 - 使用相对URL避免跨域问题
-  const API_BASE_URL = '';  // 空字符串表示使用相对路径
+  const API_BASE_URL = 'https://www.imageprompt.vip';  // 空字符串表示使用相对路径
 
   const generatePromptWithJoyCaption = async (imageFile: File) => {
     try {
