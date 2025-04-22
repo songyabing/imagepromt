@@ -29,6 +29,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://www.imageprompt.vip",
+        "https://imagepromt-git-main-kevinsongs-projects.vercel.app",
         "https://imageprompt.vip",
         "http://localhost:3000",
         "https://imageprompt.vercel.app",
