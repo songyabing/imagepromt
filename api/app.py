@@ -239,7 +239,7 @@ async def proxy_image(url: str = Query(...)):
         except requests.TooManyRedirects:
             print(f"重定向过多: {url}")
             raise HTTPException(status_code=400, detail="Too many redirects")
-        except requests.SSLError as e:
+        except requests.exceptions.SSLError as e:
             print(f"SSL错误: {str(e)}")
             # 尝试不验证SSL
             try:
