@@ -300,16 +300,16 @@ async def proxy_image(url: str = Query(...)):
                 print(f"压缩后大小: {len(content)} bytes")
         except Exception as e:
             print(f"图片内容检测/处理失败: {str(e)}")
-            if not content_type.startswith('image/'):
-                # 尝试通过文件扩展名判断
-                if url.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg')):
-                    print("通过文件扩展名判断为图片")
-                    ext = url.split('.')[-1].lower()
-                    content_type = f"image/{ext}"
-                else:
-                    print("无法确定内容是图片")
-                    raise HTTPException(status_code=400, detail="URL does not point to a valid image")
-
+            
+        if not content_type.startswith('image/'):
+            # 尝试通过文件扩展名判断
+            if url.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg')):
+                print("通过文件扩展名判断为图片")
+                ext = url.split('.')[-1].lower()
+                content_type = f"image/{ext}"
+            else:
+                print("无法确定内容是图片")
+                raise HTTPException(status_code=400, detail="URL does not point to a valid image")
         # 验证文件大小
         if len(content) > 10 * 1024 * 1024:  # 10MB
             print("图片大小超过限制")
@@ -377,16 +377,16 @@ async def upload_joycaption(files: List[UploadFile] = File(...), language: str =
             print("图片已成功转换为base64")
             
             # 调用Hugging Face API
-            API_URL = "https://api-inference.huggingface.co/models/joytag/JoyCaption"
+            API_URL = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-large"
             headers = {"Authorization": f"Bearer {HUGGINGFACE_TOKEN}"}
-            payload = {"inputs": {"image": base64_str, "language": language}}
+            payload = {"inputs": base64_str}
             
-            print("开始请求HuggingFace API...")
+            print("开始请求HuggingFace API (BLIP模型)...")
             
             # 增加重试和超时设置
             max_retries = 3
             retry_count = 0
-            timeout_value = 50  # 增加超时时间到50秒
+            timeout_value = 90  # 增加超时时间到90秒，与前端一致
             
             while retry_count < max_retries:
                 try:
@@ -402,15 +402,20 @@ async def upload_joycaption(files: List[UploadFile] = File(...), language: str =
                         try:
                             result = response.json()
                             
-                            # 增强对不同响应格式的处理
+                            # 为BLIP模型调整响应处理逻辑
                             caption = ""
+                            print(f"原始API响应: {result}")
+                            
+                            # 处理BLIP模型的响应格式
                             if isinstance(result, list) and len(result) > 0:
                                 if isinstance(result[0], dict):
-                                    caption = result[0].get('caption', result[0].get('generated_text', ''))
+                                    caption = result[0].get('generated_text', '')
                                 elif isinstance(result[0], str):
                                     caption = result[0]
                             elif isinstance(result, dict):
-                                caption = result.get('caption', result.get('generated_text', ''))
+                                caption = result.get('generated_text', '')
+                            elif isinstance(result, str):
+                                caption = result
                             
                             print(f"解析到的描述: {caption}")
                             
@@ -418,6 +423,15 @@ async def upload_joycaption(files: List[UploadFile] = File(...), language: str =
                                 print("未从API响应中解析到描述")
                                 raise HTTPException(status_code=500, detail="No caption in API response")
                                 
+                            # 如果需要中文输出，则调用翻译API
+                            if language.lower() == 'zh' and caption:
+                                try:
+                                    caption = translate_to_chinese(caption)
+                                    print(f"翻译后结果: {caption}")
+                                except Exception as e:
+                                    print(f"翻译失败: {str(e)}")
+                                    # 翻译失败不影响主流程
+                            
                             elapsed_time = time.time() - start_time
                             print(f"请求完成，总耗时: {elapsed_time:.2f}秒")
                             return {"caption": caption, "elapsed_time": elapsed_time}
@@ -976,5 +990,5 @@ async def debug_image_url(url: str = Query(...)):
             "url": url
         }
 
-    if __name__ == "__main__":
-        uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8088)))
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
