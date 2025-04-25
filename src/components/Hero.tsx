@@ -494,8 +494,8 @@ export default function Hero() {
                 className={`p-4 border rounded-lg cursor-pointer transition-all hover:shadow-sm ${selectedModel === 'joycaption' ? 'border-[#3566E3] bg-blue-50' : 'border-gray-200'}`}
                 onClick={() => setSelectedModel('joycaption')}
               >
-                <div className="font-medium">JoyCaption</div>
-                <p className="mt-1 text-sm text-gray-500">Fast and accurate image description</p>
+                <div className="font-medium">BLIP</div>
+                <p className="mt-1 text-sm text-gray-500">Simple Generation of Picture Descriptions</p>
               </div>
               <div 
                 className={`p-4 border rounded-lg cursor-pointer transition-all hover:shadow-sm ${selectedModel === 'interrogator' ? 'border-[#3566E3] bg-blue-50' : 'border-gray-200'}`}
